@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JULIE CORE :: SPATIAL GLASS HUD</title>
+    <script type="text/javascript" src="/eel.js"></script>
+    <!-- Three.js WebGL & MediaPipe Hands CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;900&family=Rajdhani:wght@500;700&display=swap');
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #020617; 
+            color: #00F2FE; 
+            font-family: 'Rajdhani', sans-serif;
+            height: 100vh; 
+            overflow: hidden; 
+            display: flex; 
+            flex-direction: column; 
+            padding: 14px;
+        }
+
+        /* Glassmorphism Navigation Bar */
+        .header {
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            padding: 10px 20px; 
+            background: rgba(15, 23, 42, 0.75);
+            border: 1px solid rgba(0, 242, 254, 0.35); 
+            border-radius: 10px;
+            backdrop-filter: blur(16px); 
+            box-shadow: 0 0 20px rgba(0, 242, 254, 0.15);
+        }
+        .title { 
+            font-family: 'Orbitron', sans-serif; 
+            font-size: 16px; 
+            font-weight: 900; 
+            letter-spacing: 2px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .badge-group { display: flex; gap: 8px; align-items: center; }
+        .badge { 
+            background: rgba(6, 78, 59, 0.85); 
+            color: #34D399; 
+            padding: 4px 10px; 
+            border-radius: 4px; 
+            font-size: 11px; 
+            font-weight: 700;
+            border: 1px solid rgba(52, 211, 153, 0.3);
+        }
+        .badge.glass {
+            background: rgba(14, 165, 233, 0.2);
+            color: #38BDF8;
+            border-color: rgba(56, 189, 248, 0.4);
+        }
+        .badge.gesture {
+            background: rgba(168, 85, 247, 0.2);
+            color: #C084FC;
+            border-color: rgba(192, 132, 252, 0.4);
+        }
+
+        /* HUD Spatial Grid */
+        .hud-grid {
+            display: grid; 
+            grid-template-columns: 300px 1fr 340px; 
+            gap: 16px; 
+            flex: 1; 
+            min-height: 0;
+            margin-top: 14px;
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.65); 
+            border: 1px solid rgba(0, 242, 254, 0.25);
+            border-radius: 12px; 
+            padding: 14px; 
+            backdrop-filter: blur(20px);
+            display: flex; 
+            flex-direction: column;
+            min-height: 0;
+            box-shadow: inset 0 0 15px rgba(0, 242, 254, 0.05);
+            position: relative;
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+        }
+        .glass-panel.dismissed {
+            transform: translateY(-20px) scale(0.95);
+            opacity: 0.2;
+        }
+
+        .panel-title { 
+            font-family: 'Orbitron', sans-serif; 
+            font-size: 11px; 
+            color: #00F2FE; 
+            border-bottom: 1px solid rgba(0,242,254,0.2); 
+            padding-bottom: 6px; 
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .stream { 
+            flex: 1; 
+            overflow-y: auto; 
+            font-family: 'Rajdhani', monospace; 
+            font-size: 13px; 
+            color: #E2E8F0; 
+            line-height: 1.5;
+            padding-right: 6px;
+        }
+        .stream::-webkit-scrollbar { width: 4px; }
+        .stream::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+        .stream::-webkit-scrollbar-thumb { background: #00F2FE; border-radius: 2px; }
+
+        /* Spatial WebGL 3D Hologram Center Viewport */
+        .center-viewport { 
+            position: relative; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            overflow: hidden;
+        }
+        #canvas3d { 
+            width: 100%; 
+            height: 100%; 
+            position: absolute;
+            top: 0; left: 0;
+            z-index: 1;
+        }
+        .hud-overlay {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            pointer-events: none;
+        }
+        .status-tag { 
+            font-family: 'Orbitron', sans-serif; 
+            font-size: 14px; 
+            font-weight: 900; 
+            letter-spacing: 4px; 
+            text-shadow: 0 0 12px #00F2FE; 
+            color: #00F2FE;
+            transition: color 0.3s ease;
+        }
+        .gesture-pill {
+            margin-top: 8px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(192, 132, 252, 0.4);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            color: #C084FC;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            pointer-events: auto;
+        }
+
+        /* Control Dock */
+        .control-bar {
+            display: flex; 
+            gap: 12px; 
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid #00F2FE; 
+            border-radius: 10px; 
+            padding: 10px 14px; 
+            margin-top: 14px;
+            box-shadow: 0 0 15px rgba(0, 242, 254, 0.1);
+        }
+        input#cmdInput, input#commandInput {
+            flex: 1; 
+            background: transparent; 
+            border: none; 
+            outline: none;
+            color: #FFF; 
+            font-size: 16px; 
+            font-family: 'Rajdhani', sans-serif; 
+            padding-left: 10px;
+        }
+        .btn {
+            background: #0284C7; 
+            border: 1px solid #00F2FE; 
+            color: white;
+            font-family: 'Orbitron', sans-serif; 
+            font-size: 11px; 
+            padding: 10px 18px;
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-weight: bold; 
+            transition: all 0.2s ease;
+        }
+        .btn:hover { 
+            background: #0369A1; 
+            box-shadow: 0 0 14px #00F2FE; 
+            transform: translateY(-1px);
+        }
+        .btn-purple {
+            background: #7C3AED;
+            border-color: #C084FC;
+        }
+        .btn-purple:hover {
+            background: #6D28D9;
+            box-shadow: 0 0 14px #C084FC;
+        }
+
+        /* Hidden Webcam Video for Gesture Tracking */
+        #webcam {
+            position: absolute;
+            width: 160px;
+            height: 120px;
+            bottom: 80px;
+            right: 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(192, 132, 252, 0.5);
+            transform: scaleX(-1);
+            opacity: 0.7;
+            display: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title">
+            <span>⚡ JULIE-CORE</span>
+            <span style="font-size: 11px; color: #94A3B8; font-weight: 500;">:: SPATIAL GLASS HUD</span>
+        </div>
+        <div class="badge-group">
+            <span class="badge">OLLAMA: gemma4:26b</span>
+            <span class="badge glass">MEM: VAULT-INDEX</span>
+            <span class="badge" id="gestureBadge">👋 GESTURES: OFF</span>
+        </div>
+    </div>
+
+    <div class="hud-grid">
+        <!-- Left Panel: Tactical Quant Telemetry Bus -->
+        <div class="glass-panel" id="panelTelemetry">
+            <div class="panel-title">
+                <span>TACTICAL QUANT BUS</span>
+                <span class="badge" id="portfolio-risk-badge" style="font-size: 9px; color: #34D399;">σ: 0.00%</span>
+            </div>
+            <div class="portfolio-tab-bar">
+                <button class="tab-btn active" data-bucket="CORE">CORE (5)</button>
+                <button class="tab-btn" data-bucket="SWING">SWING (11)</button>
+                <button class="tab-btn" data-bucket="IRS">IRS (4)</button>
+            </div>
+            <div id="pinned-breach-container"></div>
+            <div class="telemetry-content" id="active-portfolio-container">
+                <div class="telemetry-placeholder">Awaiting Sentry telemetry sync...</div>
+            </div>
+        </div>
+
+        <!-- Center Viewport: Three.js Hologram Core -->
+        <div class="glass-panel center-viewport">
+            <div id="canvas3d"></div>
+            <div class="hud-overlay">
+                <div class="status-tag" id="statusLbl">IDLE</div>
+                <div class="gesture-pill" id="gestureStatus">
+                    <span>✨ Hand Tracker:</span>
+                    <span id="gestureAction" style="color: #F8FAFC;">Off (Click Tracker to enable)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Live Conversational Stream -->
+        <div class="glass-panel" id="panelChat">
+            <div class="panel-title">
+                <span>VOICE & CHAT FEED</span>
+                <button class="btn" style="padding: 2px 8px; font-size: 9px;" onclick="clearChat()">CLEAR</button>
+            </div>
+            <div class="stream" id="chatFeed">
+                <p><b style="color:#38BDF8;">System:</b> Spatial Glass HUD initialized.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Video Input for MediaPipe -->
+    <video id="webcam" playsinline></video>
+
+    <!-- Bottom Action Dock -->
+    <div class="control-bar">
+        <button class="btn" onclick="triggerMic()">🎙️ SPEAK</button>
+        <button class="btn" id="btnGesture" onclick="toggleWebcamGestures()">👋 TRACKER: OFF</button>
+        <input type="text" id="cmdInput" placeholder="Click [SPEAK], type command, or pinch in air..." onkeydown="if(event.key==='Enter') submitCmd()">
+        <button class="btn" onclick="submitCmd()">EXECUTE</button>
+    </div>
+
+    <script>
+        // -------------------------------------------------------------
+        // 1. THREE.JS SPATIAL GLASS WEBGL STAGE & GESTURE HOVER
+        // -------------------------------------------------------------
+        const container = document.getElementById('canvas3d');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.z = 180;
+
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        // Holographic Outer Particle Lattice
+        const geometry = new THREE.SphereGeometry(60, 36, 36);
+        const material = new THREE.PointsMaterial({ color: 0x00F2FE, size: 2.2, transparent: true, opacity: 0.85 });
+        const sphere = new THREE.Points(geometry, material);
+        scene.add(sphere);
+
+        // Glassmorphic Inner Icosahedron
+        const wireGeo = new THREE.IcosahedronGeometry(36, 2);
+        const wireMat = new THREE.MeshBasicMaterial({ color: 0x38BDF8, wireframe: true, transparent: true, opacity: 0.45 });
+        const core = new THREE.Mesh(wireGeo, wireMat);
+        scene.add(core);
+
+        // Outer Cyber Rings
+        const ringGeo = new THREE.RingGeometry(75, 77, 64);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00F2FE, side: THREE.DoubleSide, transparent: true, opacity: 0.35 });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.rotation.x = Math.PI / 3;
+        scene.add(ring);
+
+        let baseSpeed = 0.008;
+        let currentSpeed = 0.008;
+        let targetHoverX = 0;
+        let targetHoverY = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            sphere.rotation.y += currentSpeed;
+            sphere.rotation.x += currentSpeed * 0.4;
+            core.rotation.y -= currentSpeed * 1.4;
+            ring.rotation.z += currentSpeed * 0.8;
+
+            // Smoothly reflect hand / cursor hover coordinates in 3D stage
+            sphere.position.x += (targetHoverX - sphere.position.x) * 0.08;
+            sphere.position.y += (targetHoverY - sphere.position.y) * 0.08;
+            core.position.x = sphere.position.x;
+            core.position.y = sphere.position.y;
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            if (!container) return;
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        // -------------------------------------------------------------
+        // 2. HUD STATE & CHAT ORCHESTRATION WITH ERROR SERIALIZATION
+        // -------------------------------------------------------------
+        function setHudState(state) {
+            const statusLbl = document.getElementById("statusLbl");
+            if (!statusLbl) return;
+            
+            const upperState = (state || "IDLE").toUpperCase();
+            statusLbl.innerText = upperState;
+
+            if (upperState === "THINKING" || upperState === "PROCESSING") {
+                statusLbl.style.color = "#F59E0B";
+                currentSpeed = 0.035;
+            } else if (upperState === "LISTENING") {
+                statusLbl.style.color = "#34D399";
+                currentSpeed = 0.025;
+            } else if (upperState === "SPEAKING") {
+                statusLbl.style.color = "#A855F7";
+                currentSpeed = 0.02;
+            } else {
+                statusLbl.style.color = "#00F2FE";
+                currentSpeed = baseSpeed;
+            }
+        }
+
+        function scrollToBottom() {
+            const feed = document.getElementById("chatFeed");
+            if (feed) feed.scrollTop = feed.scrollHeight;
+        }
+
+        function clearChat() {
+            const feed = document.getElementById("chatFeed");
+            if (feed) feed.innerHTML = `<p><b style="color:#38BDF8;">System:</b> Feed cleared.</p>`;
+        }
+
+        function appendChatMessage(sender, text) {
+            const feed = document.getElementById("chatFeed");
+            if (!feed) return;
+
+            let color = "#38BDF8";
+            if (sender.toLowerCase() === "julie") color = "#34D399";
+            else if (sender.toLowerCase() === "error") color = "#EF4444";
+            else if (sender.toLowerCase() === "pierre") color = "#38BDF8";
+
+            const p = document.createElement("p");
+            p.innerHTML = `<b style="color:${color};">${sender}:</b> ${text}`;
+            feed.appendChild(p);
+            scrollToBottom();
+        }
+
+        async function handleUserSubmit(text) {
+            if (!text || text.trim() === "") return;
+            
+            appendChatMessage("Pierre", text);
+            setHudState("THINKING");
+
+            try {
+                // Direct non-blocking call to Python backend
+                if (window.eel && typeof eel.run_julie_query === "function") {
+                    const response = await eel.run_julie_query(text)();
+                    if (response && response.text) {
+                        appendChatMessage("Julie", response.text);
+                    } else if (typeof response === "string") {
+                        appendChatMessage("Julie", response);
+                    } else {
+                        appendChatMessage("Julie", "Operational. Ready for directive.");
+                    }
+                } else if (window.eel && typeof eel.run_query === "function") {
+                    const response = await eel.run_query(text)();
+                    if (response && response.text) {
+                        appendChatMessage("Julie", response.text);
+                    } else if (typeof response === "string") {
+                        appendChatMessage("Julie", response);
+                    } else {
+                        appendChatMessage("Julie", "Operational. Ready for directive.");
+                    }
+                } else {
+                    throw new Error("Eel IPC Bridge not bound to Python runtime.");
+                }
+            } catch (err) {
+                console.error("Execution Error:", err);
+                const errMsg = err.message || (typeof err === "object" ? JSON.stringify(err) : String(err));
+                appendChatMessage("Error", errMsg);
+            } finally {
+                setHudState("IDLE");
+                const input = document.getElementById("cmdInput") || document.getElementById("commandInput");
+                if (input) input.value = "";
+            }
+        }
+
+        function submitCmd() {
+            const input = document.getElementById("cmdInput") || document.getElementById("commandInput");
+            if (!input) return;
+            handleUserSubmit(input.value.trim());
+        }
+
+        async function triggerMic() {
+            setHudState("LISTENING");
+            try {
+                if (window.eel && typeof eel.listen_voice === "function") {
+                    const text = await eel.listen_voice()();
+                    if (text) {
+                        handleUserSubmit(text);
+                    } else {
+                        setHudState("IDLE");
+                    }
+                } else {
+                    throw new Error("Eel Voice Bridge not connected.");
+                }
+            } catch (err) {
+                console.error("Voice Error:", err);
+                const errMsg = err.message || (typeof err === "object" ? JSON.stringify(err) : String(err));
+                appendChatMessage("Error", errMsg);
+                setHudState("IDLE");
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 3. MEDIAPIPE CONTACTLESS GESTURE ENGINE (BROWSER WEBGL ONLY)
+        // -------------------------------------------------------------
+        const videoElement = document.getElementById('webcam');
+        let cameraTracker = null;
+        let gestureActive = false;
+        let lastHandX = null;
+        let lastGestureTime = 0;
+
+        function onHandResults(results) {
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                document.getElementById("gestureAction").innerText = "Awaiting Hand...";
+                document.getElementById("gestureBadge").innerText = "👋 GESTURES: READY";
+                lastHandX = null;
+                targetHoverX = 0;
+                targetHoverY = 0;
+                return;
+            }
+
+            const landmarks = results.multiHandLandmarks[0];
+            const thumbTip = landmarks[4];
+            const indexTip = landmarks[8];
+            const wrist = landmarks[0];
+
+            // Reflect normalized hand position into Three.js stage hover coordinates
+            targetHoverX = (0.5 - wrist.x) * 60;
+            targetHoverY = (0.5 - wrist.y) * 40;
+
+            // 1. Compute Pinch Distance (Thumb Tip to Index Tip)
+            const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+            const now = Date.now();
+
+            // 2. Pinch Gesture -> Trigger Mic / Focus
+            if (pinchDist < 0.06 && (now - lastGestureTime > 1500)) {
+                lastGestureTime = now;
+                document.getElementById("gestureAction").innerText = "👌 PINCH DETECTED -> MIC";
+                document.getElementById("gestureBadge").innerText = "👌 PINCH (MIC)";
+                triggerMic();
+                return;
+            }
+
+            // 3. Swipe / Throw Gesture (Horizontal Delta)
+            const currentX = wrist.x;
+            if (lastHandX !== null) {
+                const deltaX = currentX - lastHandX;
+                if (Math.abs(deltaX) > 0.09 && (now - lastGestureTime > 1200)) {
+                    lastGestureTime = now;
+                    if (deltaX < 0) {
+                        document.getElementById("gestureAction").innerText = "👉 SWIPE RIGHT -> DISMISS";
+                        document.getElementById("gestureBadge").innerText = "👉 SWIPE (DISMISS)";
+                        document.getElementById("panelTelemetry").classList.toggle("dismissed");
+                    } else {
+                        document.getElementById("gestureAction").innerText = "👈 SWIPE LEFT -> CLEAR";
+                        document.getElementById("gestureBadge").innerText = "👈 SWIPE (CLEAR)";
+                        clearChat();
+                    }
+                }
+            }
+            lastHandX = currentX;
+
+            if (now - lastGestureTime > 800) {
+                document.getElementById("gestureAction").innerText = `Tracking Hand (Pinch=${pinchDist.toFixed(2)})`;
+            }
+        }
+
+        async function initHandTracking() {
+            try {
+                const hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+                hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.55,
+                    minTrackingConfidence: 0.55
+                });
+                hands.onResults(onHandResults);
+
+                cameraTracker = new Camera(videoElement, {
+                    onFrame: async () => {
+                        if (gestureActive) {
+                            await hands.send({ image: videoElement });
+                        }
+                    },
+                    width: 320,
+                    height: 240
+                });
+                await cameraTracker.start();
+                gestureActive = true;
+                document.getElementById("gestureAction").innerText = "Hand Tracker Active";
+                document.getElementById("gestureBadge").innerText = "👋 GESTURES: ONLINE";
+            } catch (e) {
+                console.warn("[MediaPipe Warning]", e);
+                document.getElementById("gestureAction").innerText = "Webcam Gesture Offloaded";
+            }
+        }
+
+        function toggleWebcamGestures() {
+            gestureActive = !gestureActive;
+            const btn = document.getElementById("btnGesture");
+            if (gestureActive) {
+                btn.innerText = "👋 TRACKER: ON";
+                btn.classList.add("btn-purple");
+                if (!cameraTracker) {
+                    initHandTracking();
+                } else {
+                    document.getElementById("gestureAction").innerText = "Hand Tracker Active";
+                    document.getElementById("gestureBadge").innerText = "👋 GESTURES: ONLINE";
+                }
+            } else {
+                btn.innerText = "👋 TRACKER: OFF";
+                btn.classList.remove("btn-purple");
+                document.getElementById("gestureAction").innerText = "Tracker Paused";
+                document.getElementById("gestureBadge").innerText = "👋 GESTURES: OFF";
+            }
+        }
+
+        // === REACTIVE HUD TELEMETRY DISPATCHER & BUCKET TABS ===
+        let currentSelectedBucket = 'CORE';
+
+        function setupBucketTabs() {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentSelectedBucket = btn.getAttribute('data-bucket') || 'CORE';
+                    updatePortfolioTelemetryHUD();
+                });
+            });
+        }
+
+        function renderCard(pos, isPinned) {
+            const isBreached = pos.spot_price > 0 && pos.spot_price <= pos.invalidation_stop;
+            const tfmClass = pos.timesfm_delta_pct >= 0 ? 'bullish' : 'bearish';
+            const chrClass = pos.chronos_delta_pct >= 0 ? 'bullish' : 'bearish';
+            const spreadWarning = pos.model_spread_delta > 5.0 ? 'warning' : '';
+
+            return `
+                <div class="ticker-card ${isBreached ? 'breach-alert' : ''}">
+                    <div class="ticker-card-header">
+                        <span class="ticker-symbol">$${pos.ticker} ${isPinned ? '<span style="color:#ff3366;font-size:0.7rem;font-weight:900;">[BREACH]</span>' : ''}</span>
+                        <span class="ticker-spot">$${Number(pos.spot_price).toFixed(2)}</span>
+                    </div>
+                    <div class="model-vectors">
+                        <span class="vector-badge ${tfmClass}">TFM: ${pos.timesfm_delta_pct > 0 ? '+' : ''}${Number(pos.timesfm_delta_pct).toFixed(2)}%</span>
+                        <span class="vector-badge ${chrClass}">CHR: ${pos.chronos_delta_pct > 0 ? '+' : ''}${Number(pos.chronos_delta_pct).toFixed(2)}%</span>
+                    </div>
+                    <div class="invalidation-risk-line">
+                        <span>Stop: $${Number(pos.invalidation_stop).toFixed(2)} (1.8x ATR)</span>
+                        <span class="spread-badge ${spreadWarning}">Δ ${Number(pos.model_spread_delta).toFixed(2)}%</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function updatePortfolioTelemetryHUD() {
+            try {
+                if (!window.eel || !eel.get_portfolio_hud_telemetry) return;
+                const telemetry = await eel.get_portfolio_hud_telemetry()();
+                if (!telemetry || !telemetry.positions) return;
+
+                const riskBadge = document.getElementById('portfolio-risk-badge');
+                if (riskBadge && typeof telemetry.systemic_risk_score === 'number') {
+                    riskBadge.textContent = `σ: ${telemetry.systemic_risk_score.toFixed(2)}%`;
+                }
+
+                const breachContainer = document.getElementById('pinned-breach-container');
+                const activeContainer = document.getElementById('active-portfolio-container');
+
+                const allPositions = telemetry.positions;
+                const breachedPositions = allPositions.filter(p => p.spot_price > 0 && p.spot_price <= p.invalidation_stop);
+                const currentBucketPositions = allPositions.filter(p => (p.bucket || 'SWING').toUpperCase() === currentSelectedBucket.toUpperCase());
+
+                // Update Tab Counts
+                const coreCount = allPositions.filter(p => (p.bucket || '').toUpperCase() === 'CORE').length;
+                const swingCount = allPositions.filter(p => (p.bucket || '').toUpperCase() === 'SWING').length;
+                const irsCount = allPositions.filter(p => (p.bucket || '').toUpperCase() === 'IRS').length;
+
+                const btnCore = document.querySelector('.tab-btn[data-bucket="CORE"]');
+                const btnSwing = document.querySelector('.tab-btn[data-bucket="SWING"]');
+                const btnIrs = document.querySelector('.tab-btn[data-bucket="IRS"]');
+                if (btnCore) btnCore.innerText = `CORE (${coreCount})`;
+                if (btnSwing) btnSwing.innerText = `SWING (${swingCount})`;
+                if (btnIrs) btnIrs.innerText = `IRS (${irsCount})`;
+
+                // Render Pinned Breaches
+                if (breachContainer) {
+                    breachContainer.innerHTML = breachedPositions.map(pos => renderCard(pos, true)).join('');
+                }
+
+                // Render Current Tab Holdings
+                if (activeContainer) {
+                    if (currentBucketPositions.length === 0) {
+                        activeContainer.innerHTML = `<div class="telemetry-placeholder">No active ${currentSelectedBucket} positions.</div>`;
+                    } else {
+                        activeContainer.innerHTML = currentBucketPositions.map(pos => renderCard(pos, false)).join('');
+                    }
+                }
+            } catch (err) {
+                console.error("HUD Telemetry Poll Error:", err);
+            }
+        }
+
+        // 2000ms Event Loop Hook
+        setInterval(updatePortfolioTelemetryHUD, 2000);
+        document.addEventListener('DOMContentLoaded', () => {
+            setupBucketTabs();
+            updatePortfolioTelemetryHUD();
+        });
+        setTimeout(() => {
+            setupBucketTabs();
+            updatePortfolioTelemetryHUD();
+        }, 500);
+    </script>
+</body>
+</html>
