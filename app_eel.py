@@ -76,20 +76,53 @@ def get_active_portfolio_context() -> str:
 
 
 WORKSPACE_ROOT = Path(r"C:\Users\Pierre\.openclaw\workspace")
-VAULT_RECONS_PATH = WORKSPACE_ROOT / "vault" / "Recons"
+VAULT_ROOT = WORKSPACE_ROOT / "vault"
+VAULT_RECONS_PATH = VAULT_ROOT / "Recons"
+HUD_BUFFER_PATH = WORKSPACE_ROOT / "hud_telemetry_buffer.json"
 SCANNER_RUNNER_PATH = WORKSPACE_ROOT / "pierre-quant" / "pierre_quant" / "runners" / "run_signal_scanner.py"
 PYTHON_EXE = WORKSPACE_ROOT / "Julie-Core" / ".venv" / "Scripts" / "python.exe"
 
+WMO_CODE_MAP = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Foggy", 48: "Depositing rime fog", 51: "Light drizzle", 53: "Moderate drizzle",
+    55: "Dense drizzle", 61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+    71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 80: "Rain showers",
+    95: "Thunderstorm"
+}
+
+
+def get_chelsea_weather_deterministic() -> str:
+    """Fetches high-reliability atmospheric data for Chelsea, QC via Open-Meteo REST API."""
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": 45.50,
+        "longitude": -75.78,
+        "current": ["temperature_2m", "relative_humidity_2m", "weather_code", "wind_speed_10m"],
+        "timezone": "America/Toronto"
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=3.0)
+        if resp.status_code == 200:
+            data = resp.json().get("current", {})
+            temp = data.get("temperature_2m", 0.0)
+            hum = data.get("relative_humidity_2m", 0)
+            wind = data.get("wind_speed_10m", 0.0)
+            wcode = data.get("weather_code", 0)
+            condition = WMO_CODE_MAP.get(wcode, "Clear")
+            return f"{condition}, {temp:.1f}°C (Humidity: {hum}%, Wind: {wind:.1f} km/h)"
+    except Exception as err:
+        logger.warning(f"Open-Meteo weather fetch failed: {err}")
+    return "Weather telemetry unavailable"
+
 
 def ensure_daily_scanner_sync():
-    """Runs signal scanner on first boot of the day if not yet executed."""
+    """Runs signal scanner on first boot/wake of the day if not yet executed today."""
     if not SCANNER_RUNNER_PATH.exists() or not PYTHON_EXE.exists():
         return
 
     today_str = date.today().isoformat()
     needs_sync = True
 
-    # Check timestamp of existing recon files
     if VAULT_RECONS_PATH.exists():
         for md_file in VAULT_RECONS_PATH.glob("*.md"):
             try:
@@ -101,11 +134,11 @@ def ensure_daily_scanner_sync():
                 pass
 
     if needs_sync:
-        logger.info("First morning boot detected. Triggering run_signal_scanner.py...")
+        logger.info("Daily market scan required. Triggering run_signal_scanner.py in background...")
         try:
-            subprocess.run([str(PYTHON_EXE), str(SCANNER_RUNNER_PATH)], timeout=30, check=False)
+            subprocess.run([str(PYTHON_EXE), str(SCANNER_RUNNER_PATH)], timeout=45, check=False)
         except Exception as e:
-            logger.warning(f"On-boot scanner trigger error: {e}")
+            logger.warning(f"On-wake scanner trigger error: {e}")
 
 
 def get_vault_convergent_setups() -> list[str]:
@@ -117,7 +150,7 @@ def get_vault_convergent_setups() -> list[str]:
     for md_file in VAULT_RECONS_PATH.glob("*.md"):
         try:
             content = md_file.read_text(encoding="utf-8")
-            if "is_convergent: true" in content or "HIGH ALPHA CONVERGENCE" in content or "[CONVERGENT]" in content:
+            if "is_convergent: true" in content or "⚡ HIGH ALPHA CONVERGENCE" in content or "HIGH ALPHA CONVERGENCE" in content:
                 ticker = md_file.stem
                 spot = re.search(r"spot_price:\s*([\d\.]+)", content)
                 stop = re.search(r"invalidation_stop:\s*([\d\.]+)", content)
@@ -137,20 +170,10 @@ def get_vault_convergent_setups() -> list[str]:
 
 
 def generate_morning_executive_brief() -> str:
-    """Compiles a deterministic morning flight check brief including daily scan alpha."""
-    # Ensure fresh daily scan on boot
+    """Compiles a deterministic morning flight check brief including live weather and scan alpha."""
     ensure_daily_scanner_sync()
+    weather_summary = get_chelsea_weather_deterministic()
 
-    # 1. Fetch Chelsea, QC Weather
-    weather_summary = "Weather feed unavailable"
-    try:
-        res = requests.get("https://wttr.in/Chelsea,Quebec?format=%C+%t+Wind:%w+Humidity:%h", timeout=3.0)
-        if res.status_code == 200:
-            weather_summary = res.text.strip()
-    except Exception as err:
-        logger.warning(f"Morning brief weather lookup failed: {err}")
-
-    # 2. Ingest Active Portfolio Telemetry Buffer
     total_positions = 0
     systemic_sigma = 0.0
     breaches = []
@@ -168,14 +191,12 @@ def generate_morning_executive_brief() -> str:
                 stop = float(p.get("invalidation_stop", 0.0))
                 ticker = p.get("ticker", "UNK")
                 if spot > 0 and spot <= stop:
-                    breaches.append(f"${ticker} (Spot: ${spot:.2f} <= Stop: ${stop:.2f})")
+                    breaches.append(f"${ticker} (Spot: ${spot:.2f} <= Stop:${stop:.2f})")
         except Exception as e:
             logger.error(f"Failed to parse HUD buffer: {e}")
 
-    # 3. Pull High-Alpha Convergent Setups from Vault
     convergent_setups = get_vault_convergent_setups()
 
-    # 4. Format Structured Output
     brief_lines = [
         "Good morning, Pierre. Executive brief compiled:",
         f"• Environment (Chelsea, QC): {weather_summary}",
@@ -279,14 +300,9 @@ def handle_external_intent(normalized_text: str) -> str | None:
                 return get_vault_recon(sym)
 
     # Deterministic Weather Intent
-    if "weather" in text_lower and ("chelsea" in text_lower or "ottawa" in text_lower or "gatineau" in text_lower):
-        location = "Chelsea,Quebec" if "chelsea" in text_lower else ("Ottawa" if "ottawa" in text_lower else "Gatineau")
-        try:
-            res = requests.get(f"https://wttr.in/{location}?format=%C+%t+Wind:%w+Humidity:%h", timeout=3.0)
-            if res.status_code == 200:
-                return f"Current weather in {location}: {res.text.strip()}"
-        except Exception as e:
-            return f"Weather service unavailable: {e}"
+    if "weather" in text_lower and ("chelsea" in text_lower or "ottawa" in text_lower or "gatineau" in text_lower or "forecast" in text_lower or "temperature" in text_lower):
+        weather_info = get_chelsea_weather_deterministic()
+        return f"Current atmospheric conditions in Chelsea, QC: {weather_info}"
             
     return None
 
