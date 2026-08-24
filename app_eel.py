@@ -211,12 +211,15 @@ def handle_external_intent(normalized_text: str) -> str | None:
         execute_hud_sync_subprocess()
         return "Initiating portfolio synchronization from the Vault. The Tactical HUD will refresh shortly."
 
-    # Conversational Vault Recon Lookup Intent (e.g. "recon on META", "recon for NVDA", "dossier for ENB")
-    recon_match = re.search(r"\b(?:recon|dossier|reconnaissance)\s+(?:on|for|of)?\s*\$?([A-Za-z]{1,5})\b", text_lower)
-    if recon_match:
-        ticker = recon_match.group(1)
-        if ticker.upper() not in ["JULIE", "SWARM", "SYSTEM", "THE", "MY", "A", "ALL", "HUD"]:
-            return get_vault_recon(ticker)
+    # Vault Recon Dossier Lookup Hook
+    if any(k in text_lower for k in ["vault", "recon", "recons", "dossier"]):
+        # Extract ticker symbol (e.g., NVDA, $NVDA, META)
+        blacklist = {"VAULT", "RECON", "RECONS", "CHECK", "REPORT", "PRICE", "CORE", "SWING", "IRS", "JULIE", "SWARM", "SYSTEM", "THE", "FOR", "GET", "SHOW", "LOOK", "WHAT", "GIVE", "PLEASE", "READ", "NOTE", "FIND", "OPEN", "AND", "WITH"}
+        candidates = re.findall(r"\b([A-Za-z]{2,5})\b", normalized_text)
+        for cand in candidates:
+            sym = cand.upper()
+            if sym not in blacklist:
+                return get_vault_recon(sym)
 
     # Deterministic Weather Intent
     if "weather" in text_lower and ("chelsea" in text_lower or "ottawa" in text_lower or "gatineau" in text_lower):
