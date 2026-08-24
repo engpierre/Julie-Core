@@ -141,6 +141,48 @@ def generate_morning_executive_brief() -> str:
     return "\n".join(brief_lines)
 
 
+VAULT_RECONS_PATH = Path(r"C:\Users\Pierre\.openclaw\workspace\vault\Recons")
+
+
+def get_vault_recon(ticker: str) -> str:
+    """Deterministically reads and summarizes an asset recon file from the Obsidian vault."""
+    clean_ticker = ticker.upper().replace("$", "").strip()
+    target_file = VAULT_RECONS_PATH / f"{clean_ticker}.md"
+    
+    if not target_file.exists():
+        return f"Pierre, no recon dossier exists in the vault for ${clean_ticker}. Run sentry recon to generate."
+
+    try:
+        content = target_file.read_text(encoding="utf-8")
+        
+        # Deterministic extraction of key metrics
+        spot = re.search(r"spot_price:\s*([\d\.]+)", content)
+        atr = re.search(r"atr_14:\s*([\d\.]+)", content)
+        stop = re.search(r"invalidation_stop:\s*([\d\.]+)", content)
+        tfm = re.search(r"timesfm_target:\s*([\d\.]+)", content)
+        chr_t = re.search(r"chronos_target:\s*([\d\.]+)", content)
+        bias = re.search(r'net_bias:\s*"([^"]+)"', content)
+
+        spot_val = float(spot.group(1)) if spot else 0.0
+        atr_val = float(atr.group(1)) if atr else 0.0
+        stop_val = float(stop.group(1)) if stop else 0.0
+        tfm_val = float(tfm.group(1)) if tfm else 0.0
+        chr_val = float(chr_t.group(1)) if chr_t else 0.0
+        bias_val = bias.group(1) if bias else "NEUTRAL"
+
+        return (
+            f"Vault Recon Dossier for ${clean_ticker}:\n"
+            f"• Spot Price: ${spot_val:.2f}\n"
+            f"• 14-Day ATR: ${atr_val:.2f}\n"
+            f"• Dynamic Invalidation Stop: ${stop_val:.2f}\n"
+            f"• TimesFM 16-Bar Horizon: ${tfm_val:.2f}\n"
+            f"• Chronos-Bolt Target: ${chr_val:.2f}\n"
+            f"• Systemic Bias: {bias_val}"
+        )
+    except Exception as e:
+        return f"Error reading vault file for ${clean_ticker}: {str(e)}"
+
+
 BRIEF_INTENT_PATTERNS = [
     r"\bgood morning\b",
     r"\bmorning brief\b",
@@ -157,7 +199,7 @@ def is_morning_brief_intent(text: str) -> bool:
 
 
 def handle_external_intent(normalized_text: str) -> str | None:
-    """Deterministic routing for external info queries, executive briefings, and quant triggers."""
+    """Deterministic routing for external info queries, executive briefings, vault recons, and quant triggers."""
     text_lower = normalized_text.lower()
     
     # Morning Executive Briefing Intent (Regex word boundary matched)
@@ -168,6 +210,13 @@ def handle_external_intent(normalized_text: str) -> str | None:
     if any(k in text_lower for k in ["refresh portfolio", "sync portfolio", "update portfolio", "sync hud"]):
         execute_hud_sync_subprocess()
         return "Initiating portfolio synchronization from the Vault. The Tactical HUD will refresh shortly."
+
+    # Conversational Vault Recon Lookup Intent (e.g. "recon on META", "recon for NVDA", "dossier for ENB")
+    recon_match = re.search(r"\b(?:recon|dossier|reconnaissance)\s+(?:on|for|of)?\s*\$?([A-Za-z]{1,5})\b", text_lower)
+    if recon_match:
+        ticker = recon_match.group(1)
+        if ticker.upper() not in ["JULIE", "SWARM", "SYSTEM", "THE", "MY", "A", "ALL", "HUD"]:
+            return get_vault_recon(ticker)
 
     # Deterministic Weather Intent
     if "weather" in text_lower and ("chelsea" in text_lower or "ottawa" in text_lower or "gatineau" in text_lower):
