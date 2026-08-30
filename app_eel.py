@@ -426,6 +426,19 @@ def get_portfolio_hud_telemetry() -> dict:
 
 
 @eel.expose
+def get_paper_portfolio_state() -> dict:
+    """Safely reads the sandboxed paper portfolio state from disk for the HUD."""
+    state_file = Path(r"C:\Users\Pierre\.openclaw\workspace\pierre-quant\pierre_quant\data\paper_portfolio_state.json")
+    if not state_file.exists():
+        return {"last_sync": 0, "total_equity": 0.0, "unrealized_pnl": 0.0, "realized_pnl": 0.0, "positions": []}
+    try:
+        with open(state_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        return {"error": "STATE_READ_LOCK", "last_sync": 0, "total_equity": 0.0, "unrealized_pnl": 0.0, "positions": []}
+
+
+@eel.expose
 def get_system_stats() -> dict:
     """Returns live system RAM and engine stats"""
     return {

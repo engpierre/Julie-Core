@@ -260,6 +260,21 @@
             <div class="telemetry-content" id="active-portfolio-container">
                 <div class="telemetry-placeholder">Awaiting Sentry telemetry sync...</div>
             </div>
+
+            <!-- Paper Portfolio & Alpha Tracker Card -->
+            <div class="paper-portfolio-card" style="margin-top: 10px; border-top: 1px solid rgba(0, 242, 254, 0.2); padding-top: 8px;">
+                <div class="panel-title" style="margin-bottom: 6px; font-size: 10px;">
+                    <span>📊 PAPER PORTFOLIO & ALPHA</span>
+                    <span id="paper-pnl-badge" class="badge" style="font-size: 9px; color: #34D399;">PnL: $0.00</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 6px; color: #94A3B8;">
+                    <span>Equity: <b id="paper-total-equity" style="color: #38BDF8;">$0.00</b></span>
+                    <span>Status: <b style="color: #34D399;">SANDBOX LIVE</b></span>
+                </div>
+                <div id="paper-positions-container" style="max-height: 180px; overflow-y: auto;">
+                    <div class="telemetry-placeholder" style="font-size: 11px; padding: 6px;">Loading paper telemetry...</div>
+                </div>
+            </div>
         </div>
 
         <!-- Center Viewport: Three.js Hologram Core -->
@@ -679,15 +694,61 @@
             }
         }
 
+        async function updatePaperPortfolioHUD() {
+            try {
+                if (!window.eel || !eel.get_paper_portfolio_state) return;
+                const state = await eel.get_paper_portfolio_state()();
+                if (!state || !state.positions) return;
+
+                const pnlBadge = document.getElementById('paper-pnl-badge');
+                const equityLbl = document.getElementById('paper-total-equity');
+                const posContainer = document.getElementById('paper-positions-container');
+
+                if (equityLbl) {
+                    equityLbl.innerText = `$${Number(state.total_equity || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                }
+
+                const unPnl = Number(state.unrealized_pnl || 0);
+                if (pnlBadge) {
+                    pnlBadge.innerText = `PnL: ${unPnl >= 0 ? '+' : ''}$${unPnl.toFixed(2)}`;
+                    pnlBadge.style.color = unPnl >= 0 ? '#34D399' : '#F43F5E';
+                }
+
+                if (posContainer) {
+                    if (state.positions.length === 0) {
+                        posContainer.innerHTML = `<div class="telemetry-placeholder" style="font-size: 11px; padding: 6px;">No active paper positions.</div>`;
+                    } else {
+                        posContainer.innerHTML = state.positions.map(p => `
+                            <div class="ticker-card" style="padding: 6px 8px; margin-bottom: 6px;">
+                                <div class="ticker-card-header" style="font-size: 11px;">
+                                    <span class="ticker-symbol">$${p.ticker} <span style="font-size: 10px; color: #94A3B8;">(${p.shares} shs)</span></span>
+                                    <span class="ticker-spot">$${Number(p.spot).toFixed(2)}</span>
+                                </div>
+                                <div class="invalidation-risk-line" style="margin-top: 4px; font-size: 10px;">
+                                    <span>Entry: $${Number(p.entry).toFixed(2)} | Stop: $${Number(p.stop).toFixed(2)}</span>
+                                    <span style="color: ${p.pnl_usd >= 0 ? '#34D399' : '#F43F5E'}; font-weight: bold;">${p.pnl_usd >= 0 ? '+' : ''}$${Number(p.pnl_usd).toFixed(2)} (${p.pnl_pct >= 0 ? '+' : ''}${Number(p.pnl_pct).toFixed(1)}%)</span>
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                }
+            } catch (err) {
+                console.error("Paper Portfolio HUD Poll Error:", err);
+            }
+        }
+
         // 2000ms Event Loop Hook
         setInterval(updatePortfolioTelemetryHUD, 2000);
+        setInterval(updatePaperPortfolioHUD, 5000);
         document.addEventListener('DOMContentLoaded', () => {
             setupBucketTabs();
             updatePortfolioTelemetryHUD();
+            updatePaperPortfolioHUD();
         });
         setTimeout(() => {
             setupBucketTabs();
             updatePortfolioTelemetryHUD();
+            updatePaperPortfolioHUD();
         }, 500);
     </script>
 </body>
